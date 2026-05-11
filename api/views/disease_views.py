@@ -93,6 +93,26 @@ class ModelBundle:
 
 
 _MODEL_BUNDLE = None
+_REMBG_SESSION = None
+
+
+def _get_rembg_session():
+    global _REMBG_SESSION
+    if _REMBG_SESSION is not None:
+        return _REMBG_SESSION
+
+    try:
+        from rembg import new_session
+        # Set U2NET_HOME to our local ml_models folder so it finds .u2net/u2net.onnx
+        model_dir = os.path.join(os.getcwd(), "api", "ml_models")
+        os.environ["U2NET_HOME"] = model_dir
+        
+        # This will now find the model locally instead of downloading
+        _REMBG_SESSION = new_session("u2net")
+        return _REMBG_SESSION
+    except Exception as e:
+        print(f"Failed to initialize rembg session: {e}")
+        return None
 
 
 def _load_model_bundle():
@@ -149,15 +169,25 @@ def _load_model_bundle():
 
 
 def _maybe_remove_background(image):
+    # Allow explicit skip via .env
+    if os.getenv("SKIP_BG_REMOVAL", "false").lower() == "true":
+        return image
+
     try:
         from rembg import remove
+        session = _get_rembg_session()
+        if not session:
+            return image
+
         img_bytes = io.BytesIO()
         image.save(img_bytes, format="PNG")
-        img_no_bg = remove(img_bytes.getvalue())
+        
+        # Use the local session we initialized
+        img_no_bg = remove(img_bytes.getvalue(), session=session)
         from PIL import Image
         return Image.open(io.BytesIO(img_no_bg)).convert("RGBA")
     except BaseException as e:
-        print(f"Background removal failed: {e}")
+        print(f"Background removal failed (skipped): {e}")
         return image
 
 
