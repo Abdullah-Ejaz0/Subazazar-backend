@@ -76,6 +76,7 @@ def ask_chatbot(request):
     try:
         result = get_rag_response(question, history)
     except Exception as exc:
+        print(f"ERROR in ask_chatbot: {str(exc)}", flush=True)
         return JsonResponse({"error": str(exc)}, status=500)
 
     try:

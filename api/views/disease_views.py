@@ -108,8 +108,22 @@ def _load_model_bundle():
         raise RuntimeError(f"Model dependencies are missing: {exc}")
 
     model_path = os.getenv("RICE_DISEASE_MODEL_PATH", "").strip()
-    if not model_path:
-        raise RuntimeError("RICE_DISEASE_MODEL_PATH is not set")
+    
+    # Try to find the model file in multiple locations for portability
+    possible_paths = [
+        model_path,                                      # As specified in .env
+        os.path.join(os.getcwd(), "api", "ml_models", "rice_disease_model.pth"),  # Portable relative path
+        os.path.join(os.path.dirname(__file__), "..", "ml_models", "rice_disease_model.pth"),
+    ]
+    
+    actual_path = None
+    for p in possible_paths:
+        if p and os.path.exists(p):
+            actual_path = p
+            break
+            
+    if not actual_path:
+        raise RuntimeError(f"Model file not found. Checked: {', '.join([str(p) for p in possible_paths if p])}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -118,7 +132,7 @@ def _load_model_bundle():
         nn.Dropout(p=0.3),
         nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES)),
     )
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.load_state_dict(torch.load(actual_path, map_location=device))
     model = model.to(device)
     model.eval()
 
@@ -137,15 +151,14 @@ def _load_model_bundle():
 def _maybe_remove_background(image):
     try:
         from rembg import remove
-    except BaseException:   # rembg calls sys.exit(1) when onnxruntime is missing;
-        return image        # SystemExit is BaseException, not Exception
-
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format="PNG")
-    img_no_bg = remove(img_bytes.getvalue())
-    from PIL import Image
-
-    return Image.open(io.BytesIO(img_no_bg)).convert("RGBA")
+        img_bytes = io.BytesIO()
+        image.save(img_bytes, format="PNG")
+        img_no_bg = remove(img_bytes.getvalue())
+        from PIL import Image
+        return Image.open(io.BytesIO(img_no_bg)).convert("RGBA")
+    except BaseException as e:
+        print(f"Background removal failed: {e}")
+        return image
 
 
 def _prepare_image(file_bytes):
@@ -214,17 +227,21 @@ Provide a simple disease advisory report with sections:
 
 Keep the language clear for rice farmers in South and Southeast Asia."""
 
-    groq_client = Groq(api_key=api_key)
-    response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": "You are an expert agricultural plant pathologist."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.3,
-        max_tokens=1200,
-    )
-    return response.choices[0].message.content
+    try:
+        groq_client = Groq(api_key=api_key)
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are an expert agricultural plant pathologist."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1200,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Groq explanation failed: {e}")
+        return None
 
 
 @extend_schema(

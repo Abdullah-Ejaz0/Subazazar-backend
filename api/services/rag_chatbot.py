@@ -187,6 +187,8 @@ def _get_vectorstore():
 def get_rag_response(user_question, chat_history=None):
     
     api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not api_key:
+        print("WARNING: GROQ_API_KEY is not set in environment variables!", flush=True)
 
     history = chat_history or []
     lang = _detect_language(user_question)
